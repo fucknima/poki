@@ -1,0 +1,53 @@
+name: Poki OpenCode Go IPA
+on:
+  push:
+    branches: [build/opencode-go-0.4.1]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  ipa:
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse changed Swift files
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in native/ios-app/Poki/Chat/{ModelKeys,ModelCatalog,PiLoop,ChatModel,PokiDetailsView}.swift native/ios-app/PokiTests/OpenCodeGoProviderTests.swift; do
+            swiftc -frontend -parse "$f"
+          done
+      - name: Build unsigned IPA
+        uses: ./.github/actions/build-ipa
+        with:
+          version: '0.4.1'
+          build: '1500'
+          editions: external
+      - name: Verify package
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s out/Poki-external-unsigned.ipa
+          unzip -t out/Poki-external-unsigned.ipa | tail -1
+          mv out/Poki-external-unsigned.ipa out/Poki-external-0.4.1-Go-1500-unsigned.ipa
+          ( cd out && shasum -a 256 Poki-external-0.4.1-Go-1500-unsigned.ipa | tee SHA256SUMS )
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Poki-Go-IPA
+          path: |
+            out/Poki-external-0.4.1-Go-1500-unsigned.ipa
+            out/Poki-signing.zip
+            out/SHA256SUMS
+          if-no-files-found: error
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create go-0.4.1-build1500 out/Poki-external-0.4.1-Go-1500-unsigned.ipa out/Poki-signing.zip out/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Poki 0.4.1 with OpenCode Go (unsigned)" \
+            --notes "Poki main 0f894751 with Go integration from merged PR 68. The external IPA must be signed with your own Apple signing certificate before installation." \
+            --latest=false
